@@ -12,7 +12,9 @@ public class Pickomino : MonoBehaviour
     [SerializeField] GameObject GameGroup;
 
     [SerializeField] Button AddPlayerButton;
+    [SerializeField] Button RemovePlayerButton;
     [SerializeField] Button StartGameButton;
+    [SerializeField] Button EndGameButton;
     [SerializeField] Button RollButton;
     [SerializeField] Button StopButton;
 
@@ -36,11 +38,6 @@ public class Pickomino : MonoBehaviour
     [SerializeField] Sprite DiceFaceSprite5;
     [SerializeField] Sprite DiceFaceSpriteW;
 
-    [SerializeField] string tileWormsString1;
-    [SerializeField] string tileWormsString2;
-    [SerializeField] string tileWormsString3;
-    [SerializeField] string tileWormsString4;
-
     [SerializeField] int nPlayersMax = 5;
 
     [SerializeField] int nDice = 8;
@@ -51,7 +48,9 @@ public class Pickomino : MonoBehaviour
     [SerializeField] int tileValMin = 21;
     [SerializeField] int tileValMax = 36;
 
-    [SerializeField] float rollSpreadScale = 2/3;
+    [SerializeField] float rollSpreadScale = 1;
+
+    [SerializeField] int triesMax = 100;
 
     private List<Sprite> DiceFaceSprites = new List<Sprite>();
     private List<string> tileWormsStrings = new List<string>();
@@ -59,8 +58,10 @@ public class Pickomino : MonoBehaviour
     private List<GameObject> RolledDice = new List<GameObject>();
     private List<GameObject> Tiles = new List<GameObject>();
     private List<GameObject> Containers = new List<GameObject>();
+    private List<GameObject> PlayerAreas = new List<GameObject>();
     private List<GameObject> PlayerTileAreas = new List<GameObject>();
     private List<Text> PlayerNameTexts = new List<Text>();
+    private List<Text> PlayerWormTotalTexts = new List<Text>();
 
     private List<int> takenFaces = new List<int>();
     private List<int> tableTileVals = new List<int>();
@@ -87,11 +88,6 @@ public class Pickomino : MonoBehaviour
         DiceFaceSprites.Add(DiceFaceSprite5);
         DiceFaceSprites.Add(DiceFaceSpriteW);
 
-        tileWormsStrings.Add(tileWormsString1);
-        tileWormsStrings.Add(tileWormsString2);
-        tileWormsStrings.Add(tileWormsString3);
-        tileWormsStrings.Add(tileWormsString4);
-
         // Create containers to keep the tiles in place in the Table Area
         for (int tileVal = tileValMin; tileVal <= tileValMax; tileVal++)
         {
@@ -104,20 +100,23 @@ public class Pickomino : MonoBehaviour
 
     }
 
+    public void Exit()
+    {
+        Application.Quit();
+    }
+
 
     public void OnPressAddPlayer()
     {
         nPlayers++;
 
-        StartGameButton.interactable = true;
-
-        if (nPlayers == nPlayersMax)
-        {
-            AddPlayerButton.interactable = false;
-        }
+        AddPlayerButton.interactable = false;
+        RemovePlayerButton.interactable = false;
+        StartGameButton.interactable = false;
 
         GameObject NewPlayerArea = Instantiate(PlayerAreaPrefab, new Vector2(0, 0), Quaternion.identity);
         NewPlayerArea.transform.SetParent(PlayerZone.transform, false);
+        PlayerAreas.Add(NewPlayerArea);
 
         Text PlayerNameText = NewPlayerArea.GetComponent<PlayerAreaSpecs>().PlayerNameText;
         PlayerNameTexts.Add(PlayerNameText);
@@ -125,18 +124,54 @@ public class Pickomino : MonoBehaviour
 
         InputField PlayerNameInputField = NewPlayerArea.GetComponent<PlayerAreaSpecs>().PlayerNameInputField;
         PlayerNameInputField.Select();
-        PlayerNameInputField.onEndEdit.AddListener(delegate { PlayerNameText.color = Color.black; });
+        PlayerNameInputField.onEndEdit.AddListener(delegate
+        {
+            if (PlayerNameText.text != "")
+            {
+                PlayerNameText.color = Color.black;
+                AddPlayerButton.interactable = true;
+                RemovePlayerButton.interactable = true;
+                StartGameButton.interactable = true;
+            }
+            if (nPlayers == nPlayersMax)
+            {
+                AddPlayerButton.interactable = false;
+            }
+        });
+
+        Text PlayerWormTotalText = NewPlayerArea.GetComponent<PlayerAreaSpecs>().PlayerWormTotalText;
+        PlayerWormTotalText.text = "";
+        PlayerWormTotalTexts.Add(PlayerWormTotalText);
 
         PlayerTileAreas.Add(NewPlayerArea.GetComponent<PlayerAreaSpecs>().PlayerTileArea);
         PlayerStacks.Add(new List<int>());
     }
 
 
+    public void OnPressRemovePlayer()
+    {
+        nPlayers--;
+
+        AddPlayerButton.interactable = true;
+        if (nPlayers == 0)
+        {
+            RemovePlayerButton.interactable = false;
+            StartGameButton.interactable = false;
+        }
+
+        Destroy(PlayerAreas[nPlayers]);
+        PlayerAreas.RemoveAt(nPlayers);
+        PlayerNameTexts.RemoveAt(nPlayers);
+        PlayerWormTotalTexts.RemoveAt(nPlayers);
+        PlayerTileAreas.RemoveAt(nPlayers);
+        PlayerStacks.RemoveAt(nPlayers);
+    }
+
+
     public void OnPressStartGame()
     {
-        AddPlayerButton.gameObject.SetActive(false);
-        StartGameButton.GetComponentInChildren<Text>().text = "Next Game";
         InitializationGroup.SetActive(false);
+        EndGameButton.interactable = true;
         GameGroup.SetActive(true);
         StartGame();
     }
@@ -145,11 +180,23 @@ public class Pickomino : MonoBehaviour
     public void StartGame()
     {
         // Clean up from possible previous game
+        ClearArea(RollArea);
+        ClearArea(SaveArea);
+        RolledDice.Clear();
+        takenFaces.Clear();
+        tableTileVals.Clear();
+        foreach (GameObject Tile in Tiles)
+        {
+            Destroy(Tile);
+        }
         Tiles.Clear();
         for (int iPlayer = 0; iPlayer < nPlayers; iPlayer++)
         {
             ClearArea(PlayerTileAreas[iPlayer]);
+            PlayerTileAreas[iPlayer].GetComponent<HorizontalLayoutGroup>().spacing = -40;
             PlayerStacks[iPlayer].Clear();
+            PlayerWormTotalTexts[iPlayer].text = "";
+            PlayerWormTotalTexts[iPlayer].color = Color.black;
             PlayerNameTexts[iPlayer].color = Color.black;
         }
 
@@ -164,7 +211,7 @@ public class Pickomino : MonoBehaviour
             NewTile.GetComponent<TileSpecs>().tileVal = tileVal;
             NewTile.GetComponent<TileSpecs>().tileWorms = tileWorms;
             NewTile.GetComponent<TileSpecs>().ValText.text = tileVal.ToString();
-            NewTile.GetComponent<TileSpecs>().WormText.text = tileWormsStrings[tileWorms - 1];
+            NewTile.GetComponent<TileSpecs>().WormText.text = RomanNumeralString(tileWorms);
             NewTile.GetComponent<Button>().interactable = false;
             NewTile.GetComponent<Button>().onClick.AddListener(() => OnPressTile(tileIndex));
             Tiles.Add(NewTile);
@@ -191,6 +238,7 @@ public class Pickomino : MonoBehaviour
             {
                 worms[iPlayer] += Tiles[tileVal - tileValMin].GetComponent<TileSpecs>().tileWorms;
             }
+            PlayerWormTotalTexts[iPlayer].text = String.Format("{0}", worms[iPlayer]);
             maxTileVals.Add(PlayerStacks[iPlayer].DefaultIfEmpty().Max());
         }
 
@@ -214,7 +262,9 @@ public class Pickomino : MonoBehaviour
         }
 
         PlayerNameTexts[winnerIndex].color = Color.yellow;
+        PlayerWormTotalTexts[winnerIndex].color = Color.yellow;
 
+        EndGameButton.interactable = false;
         GameGroup.SetActive(false);
         InitializationGroup.SetActive(true);
     }
@@ -306,20 +356,19 @@ public class Pickomino : MonoBehaviour
     public void RollDice(int nDiceToRoll)
     {
         int face;
-        List<int> rolledFaces = new List<int>();
-
+        //List<int> rolledFaces = new List<int>();
+        //for (int i = 0; i < nDiceToRoll; i++)
+        //{
+        //    face = UnityEngine.Random.Range(1, nFaces + 1);
+        //    rolledFaces.Add(face);
+        //}
+        //rolledFaces.Sort();
         for (int i = 0; i < nDiceToRoll; i++)
         {
             face = UnityEngine.Random.Range(1, nFaces + 1);
-            rolledFaces.Add(face);
-        }
-        rolledFaces.Sort();
-        for (int i = 0; i < nDiceToRoll; i++)
-        {
-            //face = UnityEngine.Random.Range(1, nFaces + 1);
-            face = rolledFaces[i];
-            GameObject NewDice = Instantiate(DicePrefab, new Vector2(0, 0), Quaternion.identity);
-            //GameObject NewDice = Instantiate(DicePrefab, FindNewDicePos(), Quaternion.Euler(0f, 0f, UnityEngine.Random.Range(0f, 360f)));
+            //face = rolledFaces[i];
+            //GameObject NewDice = Instantiate(DicePrefab, new Vector2(0, 0), Quaternion.identity);
+            GameObject NewDice = Instantiate(DicePrefab, FindNewDicePos(), Quaternion.Euler(0f, 0f, UnityEngine.Random.Range(0f, 360f)));
             NewDice.transform.SetParent(RollArea.transform, false);
             NewDice.GetComponent<DiceSpecs>().diceFace = face;
             NewDice.GetComponent<Image>().sprite = DiceFaceSprites[face - 1];
@@ -488,6 +537,90 @@ public class Pickomino : MonoBehaviour
                 stealableTileVals.Add(topTileVal);
             }
         }
+    }
+
+
+    private string RomanNumeralString(int tileWorms)
+    {
+        string tileWormsString = "";
+        do
+        {
+            if (tileWorms >= 10)
+            {
+                tileWormsString += "X";
+                tileWorms -= 10;
+            }
+            else if (tileWorms == 9)
+            {
+                tileWormsString += "IX";
+                tileWorms -= 9;
+            }
+            else if (tileWorms >= 5)
+            {
+                tileWormsString += "V";
+                tileWorms -= 5;
+            }
+            else if (tileWorms == 4)
+            {
+                tileWormsString += "IV";
+                tileWorms -= 4;
+            }
+            else
+            {
+                tileWormsString += "I";
+                tileWorms--;
+            }
+        } while (tileWorms > 0);
+
+        return tileWormsString;
+    }
+
+
+    private Vector2 FindNewDicePos()
+    {
+        Vector2 newPos;
+        Collider2D[] neighbours;
+        Rect rollAreaRect = RollArea.GetComponent<RectTransform>().rect;
+        Rect diceRect = DicePrefab.GetComponent<RectTransform>().rect;
+        float minDistance = diceRect.width * Mathf.Sqrt(2);
+        float sigma = diceRect.width * rollSpreadScale;
+        float x;
+        float xMin = rollAreaRect.xMin + minDistance;
+        float xMax = rollAreaRect.xMax - minDistance;
+        float y;
+        float yMin = rollAreaRect.yMin + minDistance;
+        float yMax = rollAreaRect.yMax - minDistance;
+        int tries = 0;
+        do
+        {
+            do
+            {
+                x = NextGaussian() * sigma;
+            } while (x < xMin || x > xMax);
+            do
+            {
+                y = NextGaussian() * sigma;
+            } while (y < yMin || y > yMax);
+            newPos = new Vector2(x, y);
+            neighbours = UnityEngine.Physics2D.OverlapCircleAll(newPos, minDistance);
+        } while (neighbours.Length > 0 && tries < triesMax);
+        return newPos;
+    }
+
+
+    public static float NextGaussian()
+    {
+        float v1, v2, s;
+        do
+        {
+            v1 = 2.0f * UnityEngine.Random.Range(0f, 1f) - 1.0f;
+            v2 = 2.0f * UnityEngine.Random.Range(0f, 1f) - 1.0f;
+            s = v1 * v1 + v2 * v2;
+        } while (s >= 1.0f || s == 0f);
+
+        s = Mathf.Sqrt((-2.0f * Mathf.Log(s)) / s);
+
+        return v1 * s;
     }
 
 

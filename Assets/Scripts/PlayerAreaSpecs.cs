@@ -7,5 +7,6 @@ public class PlayerAreaSpecs : MonoBehaviour
 {
     public InputField PlayerNameInputField;
     public Text PlayerNameText;
+    public Text PlayerWormTotalText;
     public GameObject PlayerTileArea;
 }
